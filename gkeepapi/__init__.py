@@ -219,10 +219,9 @@ class API(object):
 class Keep(object):
     """High level Google Keep client.
 
-    Stores a local copy of the Keep node tree. To start, first login and sync Notes::
+    Stores a local copy of the Keep node tree. To start, first login::
 
         keep.login('...', '...')
-        keep.sync()
 
     Individual Notes can be retrieved by id::
 
@@ -260,7 +259,10 @@ class Keep(object):
         Raises:
             LoginException: If there was a problem logging in.
         """
-        return self._api.login(username, password, get_mac())
+        ret = self._api.login(username, password, get_mac())
+        if ret:
+            self.sync()
+        return ret
 
     def get(self, node_id):
         """Get a note with the given ID.
@@ -320,7 +322,7 @@ class Keep(object):
             (trashed is None or node.trashed == trashed)
         )
 
-    def createNote(self, name=None, text=None):
+    def createNote(self, title=None, text=None):
         """Create a new managed note. Any changes to the note will be uploaded when :py:meth:`sync` is called.
 
         Args:
@@ -331,8 +333,8 @@ class Keep(object):
             gkeepapi.node.List: The new note.
         """
         node = _node.Note()
-        if name is not None:
-            node.name = name
+        if title is not None:
+            node.title = title
         if text is not None:
             node.text = text
         self.add(node)
@@ -450,7 +452,7 @@ class Keep(object):
             labels_updated = any((i.dirty for i in self._labels.values()))
             changes = self._api.changes(
                 target_version=self._version,
-                nodes=[i.save() for i in self._nodes.values() if i.dirty],
+                nodes=[i.save() for i in self._findDirtyNodes()],
                 labels=[i.save() for i in self._labels.values()] if labels_updated else None,
             )
 
@@ -528,6 +530,19 @@ class Keep(object):
             logger.debug('Deleted label: %s', label_id)
 
         self._labels = labels
+
+    def _findDirtyNodes(self):
+        for node in list(self._nodes.values()):
+            for child in node.children:
+                if not child.id in self._nodes:
+                    self._nodes[child.id] = child
+
+        nodes = []
+        for node in self._nodes.values():
+            if node.dirty:
+                nodes.append(node)
+
+        return nodes
 
     def _clean(self):
         """Recursively check that all nodes are reachable."""
